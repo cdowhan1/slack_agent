@@ -259,7 +259,7 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     console.log('🤖 Calling Anthropic API...');
     
     const queryResponse = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20240620',
+      model: 'claude-3-5-haiku-20241022',
       max_tokens: 1024,
       system: `You are a Shopify GraphQL expert. Convert natural language questions into valid Shopify GraphQL queries.
 
@@ -338,7 +338,7 @@ Only return the GraphQL query string, nothing else.`,
     }
     
     const formatResponse = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20240620',
+      model: 'claude-3-5-haiku-20241022',
       max_tokens: 2048,
       system: `You are a helpful assistant formatting Shopify data for Slack.
 
