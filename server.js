@@ -64,14 +64,14 @@ const ADMIN_USERS = [
 
 const ALLOWED_OPERATIONS = {
   read: true,
-  update: true,   // Enable updates for admins
+  update: true,   // Admins can update
   create: false,
   delete: false,
 };
 
 const RATE_LIMIT = {
   maxRequests: 10,
-  windowMs: 60000,
+  windowMs: 60000, // 1 minute
 };
 
 const userRequestCounts = new Map();
@@ -128,9 +128,10 @@ function isWriteOperation(message) {
   ];
   
   const lowerMessage = message.toLowerCase();
-  // Only match if it's clearly an action command, not a question
-  if (lowerMessage.includes('what') || lowerMessage.includes('show') || lowerMessage.includes('tell') || lowerMessage.includes('how')) {
-    return false; // Questions are always read operations
+  // Questions are always read operations
+  if (lowerMessage.includes('what') || lowerMessage.includes('show') || 
+      lowerMessage.includes('tell') || lowerMessage.includes('how')) {
+    return false;
   }
   
   return writeKeywords.some(keyword => lowerMessage.includes(keyword));
@@ -191,6 +192,9 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     
     statusMessage = await say('🔍 Analyzing your request...');
     
+    // ========================================
+    // GUARDRAIL 1: Check if user is allowed
+    // ========================================
     if (!isUserAllowed(userId)) {
       if (statusMessage && client && channelId && statusMessage.ts) {
         await client.chat.update({
@@ -204,6 +208,9 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
       return;
     }
     
+    // ========================================
+    // GUARDRAIL 2: Rate limiting
+    // ========================================
     if (!checkRateLimit(userId)) {
       if (statusMessage && client && channelId && statusMessage.ts) {
         await client.chat.update({
@@ -217,6 +224,9 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
       return;
     }
     
+    // ========================================
+    // GUARDRAIL 3: Check for write operations
+    // ========================================
     if (isWriteOperation(cleanMessage)) {
       if (!ALLOWED_OPERATIONS.update && !isUserAdmin(userId)) {
         if (statusMessage && client && channelId && statusMessage.ts) {
@@ -245,10 +255,14 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
       }
     }
     
+    // ========================================
+    // GUARDRAIL 4: Sensitive operations warning
+    // ========================================
     if (containsSensitiveOperation(cleanMessage)) {
       await say('⚠️ This is a sensitive operation. Type "CONFIRM" or "CANCEL"');
     }
     
+    // Update status
     if (statusMessage && client && channelId && statusMessage.ts) {
       try {
         await client.chat.update({
@@ -263,21 +277,90 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     
     console.log('🤖 Calling Anthropic API...');
     
+    // ========================================
+    // STEP 1: Generate GraphQL Query with Claude
+    // ========================================
     const queryResponse = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 1024,
-      system: `You are a Shopify GraphQL expert. Convert natural language questions into valid Shopify GraphQL queries.
+      model: 'claude-3-5-sonnet-latest',
+      max_tokens: 1500,
+      system: `You are a Shopify GraphQL expert for a trading card and collectibles store. Convert natural language questions into efficient GraphQL queries.
 
-IMPORTANT RESTRICTIONS:
-- ONLY generate READ queries (no mutations)
-- Use "query" keyword, NOT "mutation"
-- Focus on: products, productVariants, inventory lookups
+STORE STRUCTURE:
+- product_type values: 
+- "Sealed" (boxes/packs), 
+- "Graded" or "Raw" (individual cards,Graded cards utilize the Grading and Grade metafields, since they've been graded and authenticated by a professional grader)
+- "Jerseys" (for apparel), 
+- "Sealed Case" (Cases, separate from "Sealed" due to higher pricep point and target consumer
 
-Examples:
-- "show products under $50" → query { products(first: 50, query: "variants.price:<50") { edges { node { id title variants(first: 1) { edges { node { price } } } } } } }
-- "inventory for SKU-123" → query { productVariants(first: 10, query: "sku:SKU-123") { edges { node { sku inventoryQuantity product { title } } } } }
 
-Only return the GraphQL query string, nothing else.`,
+AVAILABLE METAFIELDS: (If you cannot find a specific metafield, try messing with the cases and capitalizations (e.g Singlesent vs. singlesent)
+- global.created_at: when product was created
+- global.updated_at: when manually updated
+- global.updated_price_count: count of manual discounts
+- global.releasedate: release date
+- global.serial: serial number
+- global.supbrand,supplier brand 
+- global.suptype: supplier type (not typically used)
+- global.waxtype: variant for Sealed (e.g., "hobby box", "blaster box")
+- global.waxman: manufacturer for Sealed products
+- global.waxyear: production year (e.g., 2022)
+- global.waxsport: sport for Sealed products (Baseball, Basketball, etc.)
+- global.waxgame: game for Sealed
+- global.waxent: entertainment for Sealed
+- global.casetype: case type
+- global.singlesgame: game for Singles (e.g., "Pokemon", "Magic")
+- global.singlesent: entertainment for Singles
+- global.sport: sport name (e.g., "Baseball", "Basketball")
+- global.Modern: "Modern" or "Vintage"
+- global.Grading: grading company (e.g., "PSA", "BGS", "CGC")
+- global.Grade: grade number (e.g., "10", "9.5", "9")
+- custom.player_name: player name ("Shohei Ohtani)
+- custom.team: team name
+
+QUERY STRATEGY FOR LARGE CATALOGS:
+1. ALWAYS filter by product_type FIRST when relevant:
+   - User mentions "sealed", "graded" or "raw" → query: "product_type:Sealed"
+   - User mentions "cards", "singles", "graded" → query: "product_type:Singles"
+
+2. Combine filters in query string for server-side filtering:
+   query: "product_type:Singles AND title:*pikachu*"
+   query: "product_type:Sealed AND title:*baseball*"
+
+3. Fetch ONLY needed metafields using specific syntax:
+   metafield(namespace: "custom", key: "Grade") { value } 
+   Use aliases for readability: grade: metafield(namespace: "custom", key: "Grade") { value }
+
+4. Pagination:
+   - For "how many" questions: first: 250 (max per query)
+   - For "show me" questions: first: 10-20
+   - Never fetch all metafields - only what's needed
+
+QUERY EXAMPLES:
+
+PSA 10 Pikachu cards (count):
+query { products(first: 250, query: "product_type:Singles AND title:*pikachu*") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity sku } } } grading: metafield(namespace: "custom", key: "Grading") { value } grade: metafield(namespace: "custom", key: "Grade") { value } } } } }
+
+Sealed hobby boxes from 2022 Baseball:
+query { products(first: 250, query: "product_type:Sealed AND title:*baseball*") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity price } } } waxtype: metafield(namespace: "custom", key: "waxtype") { value } waxyear: metafield(namespace: "custom", key: "waxyear") { value } waxsport: metafield(namespace: "custom", key: "waxsport") { value } } } } }
+
+Baseball cards by specific player:
+query { products(first: 250, query: "product_type:Singles AND title:*trout*") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity } } } sport: metafield(namespace: "custom", key: "Sport") { value } player: metafield(namespace: "custom", key: "player_name") { value } team: metafield(namespace: "custom", key: "Team") { value } } } } }
+
+Modern vs Vintage Pokemon singles:
+query { products(first: 250, query: "product_type:Singles AND title:*pokemon*") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity } } } modern: metafield(namespace: "custom", key: "Modern") { value } game: metafield(namespace: "custom", key: "singlesgame") { value } } } } }
+
+BGS graded cards:
+query { products(first: 250, query: "product_type:Singles") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity } } } grading: metafield(namespace: "custom", key: "Grading") { value } grade: metafield(namespace: "custom", key: "Grade") { value } } } } }
+
+CRITICAL RULES:
+- Always use product_type filter first
+- Fetch specific and relevant metafields based on user request, not all metafields
+- Use aliases for metafields (grade:, player:, sport:)
+- ProductConnection has NO totalCount field - count results in edges array
+- For grade questions, ALWAYS fetch BOTH "Grading" and "Grade" metafields
+- Title searches use wildcards: title:*keyword*
+
+RESPONSE FORMAT: Return ONLY the GraphQL query string. No explanations, no markdown, no code blocks.`,
       messages: [{
         role: 'user',
         content: cleanMessage,
@@ -286,6 +369,7 @@ Only return the GraphQL query string, nothing else.`,
 
     const graphqlQuery = queryResponse.content[0].text.trim();
     
+    // Update status
     if (statusMessage && client && channelId && statusMessage.ts) {
       try {
         await client.chat.update({
@@ -298,6 +382,9 @@ Only return the GraphQL query string, nothing else.`,
       }
     }
     
+    // ========================================
+    // GUARDRAIL 5: Block mutation queries
+    // ========================================
     if (isMutationQuery(graphqlQuery)) {
       if (!ALLOWED_OPERATIONS.update || !isUserAdmin(userId)) {
         if (statusMessage && client && channelId && statusMessage.ts) {
@@ -315,8 +402,12 @@ Only return the GraphQL query string, nothing else.`,
     
     console.log(`[${new Date().toISOString()}] User ${userId} query:`, graphqlQuery);
     
+    // ========================================
+    // STEP 2: Execute query on Shopify
+    // ========================================
     const shopifyData = await queryShopify(graphqlQuery);
     
+    // Update status
     if (statusMessage && client && channelId && statusMessage.ts) {
       try {
         await client.chat.update({
@@ -329,6 +420,7 @@ Only return the GraphQL query string, nothing else.`,
       }
     }
     
+    // Check for errors
     if (shopifyData.errors) {
       if (statusMessage && client && channelId && statusMessage.ts) {
         await client.chat.update({
@@ -342,18 +434,39 @@ Only return the GraphQL query string, nothing else.`,
       return;
     }
     
+    // ========================================
+    // STEP 3: Format response with Claude
+    // ========================================
     const formatResponse = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-20241022',
+      model: 'claude-3-5-sonnet-latest',
       max_tokens: 2048,
-      system: `You are a helpful assistant formatting Shopify data for Slack.
+      system: `You are a helpful assistant formatting Shopify product data for a trading card store.
 
-Make the response:
+FORMAT GUIDELINES:
 - Easy to read with bullet points
-- Include relevant emojis
-- Highlight important info (prices, inventory)
-- Keep it concise
-- Use Slack formatting (*bold*)
-- Maximum 10 items per response`,
+- Include emojis: 📦 products, 💰 prices, 📊 inventory, ⭐ grades
+- Use *bold* for important info (prices, grades, inventory counts)
+- Keep it concise and scannable
+- Maximum 10 items per response (mention if there are more)
+- For "how many" questions: Lead with the TOTAL COUNT in bold
+- For graded cards: Always show grading company AND grade together
+
+RESPONSE PATTERNS:
+
+For counting queries:
+Found *12 products* matching your search:
+• Product Name - SKU: ABC123 - Stock: 5 units - PSA 10 - $299.99
+• Product Name 2 - SKU: DEF456 - Stock: 0 units - BGS 9.5 - $149.99
+
+For inventory queries:
+📊 *Inventory Status*
+• Product Name - *15 units* in stock - $49.99
+• Product Name 2 - *Out of stock* - $29.99
+
+For sealed products:
+📦 *Sealed Products*
+• 2022 Baseball Hobby Box - Manufacturer: Topps - Stock: 8 boxes - $89.99
+• 2023 Basketball Blaster - Manufacturer: Panini - Stock: 3 boxes - $39.99`,
       messages: [{
         role: 'user',
         content: `User asked: "${cleanMessage}"\n\nShopify data:\n${JSON.stringify(shopifyData.data, null, 2)}\n\nFormat this for Slack.`,
@@ -362,6 +475,7 @@ Make the response:
 
     const formattedResponse = formatResponse.content[0].text;
     
+    // Delete status message
     if (statusMessage && client && channelId && statusMessage.ts) {
       try {
         await client.chat.delete({
@@ -373,6 +487,7 @@ Make the response:
       }
     }
     
+    // Send final response
     await say(formattedResponse);
     
   } catch (error) {
@@ -390,6 +505,9 @@ Make the response:
   }
 }
 
+// ========================================
+// START THE APP
+// ========================================
 (async () => {
   await app.start();
   console.log('⚡️ Shopify AI Assistant is running!');
