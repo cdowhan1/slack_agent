@@ -164,10 +164,15 @@ app.message(async ({ message, say }) => {
   }
 });
 
-async function handleMessage(userMessage, userId, say) {
+async function handleMessage(userMessage, userId, say, client, channelId) {
   try {
     // Remove bot mention from message
     const cleanMessage = userMessage.replace(/<@[A-Z0-9]+>/g, '').trim();
+    
+    // Show typing indicator
+    if (client && channelId) {
+      await client.conversations.typing({ channel: channelId });
+    }
     
     // ========================================
     // GUARDRAIL 1: Check if user is allowed
