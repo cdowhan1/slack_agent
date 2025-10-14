@@ -1,5 +1,5 @@
 const { App } = require('@slack/bolt');
-const Anthropic = require('@anthropic-ai/sdk');
+const Anthropic = require('@anthropic-ai/sdk').default;
 const fetch = require('node-fetch');
 
 // Validate environment variables
@@ -257,21 +257,6 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     }
     
     console.log('🤖 Calling Anthropic API...');
-    console.log('anthropic exists:', !!anthropic);
-    console.log('anthropic.messages exists:', !!anthropic?.messages);
-    console.log('anthropic.messages.create exists:', !!anthropic?.messages?.create);
-    
-    if (!anthropic) {
-      throw new Error('Anthropic SDK object is undefined');
-    }
-    
-    if (!anthropic.messages) {
-      throw new Error('anthropic.messages is undefined');
-    }
-    
-    if (!anthropic.messages.create) {
-      throw new Error('anthropic.messages.create is undefined');
-    }
     
     const queryResponse = await anthropic.messages.create({
       model: 'claude-3-5-sonnet-20241022',
