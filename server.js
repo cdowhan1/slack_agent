@@ -42,8 +42,6 @@ try {
 // GUARDRAILS CONFIGURATION
 // ========================================
 
-
-
 // 1. ALLOWED USERS (Whitelist specific Slack user IDs)
 const ALLOWED_USERS = [
   // Add Slack user IDs here, or leave empty to allow all
@@ -259,9 +257,20 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     }
     
     console.log('🤖 Calling Anthropic API...');
+    console.log('anthropic exists:', !!anthropic);
+    console.log('anthropic.messages exists:', !!anthropic?.messages);
+    console.log('anthropic.messages.create exists:', !!anthropic?.messages?.create);
     
-    if (!anthropic || !anthropic.messages) {
-      throw new Error('Anthropic SDK is not properly initialized');
+    if (!anthropic) {
+      throw new Error('Anthropic SDK object is undefined');
+    }
+    
+    if (!anthropic.messages) {
+      throw new Error('anthropic.messages is undefined');
+    }
+    
+    if (!anthropic.messages.create) {
+      throw new Error('anthropic.messages.create is undefined');
     }
     
     const queryResponse = await anthropic.messages.create({
