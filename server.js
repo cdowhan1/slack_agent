@@ -64,7 +64,7 @@ const ADMIN_USERS = [
 
 const ALLOWED_OPERATIONS = {
   read: true,
-  update: false,
+  update: true,   // Enable updates for admins
   create: false,
   delete: false,
 };
@@ -117,17 +117,22 @@ function checkRateLimit(userId) {
 
 function isWriteOperation(message) {
   const writeKeywords = [
-    'update',
-    'change',
-    'modify',
-    'set',
-    'delete',
-    'remove',
-    'create',
-    'add new',
+    'update inventory',
+    'change price',
+    'modify product',
+    'set price',
+    'delete product',
+    'remove product',
+    'create product',
+    'add product',
   ];
   
   const lowerMessage = message.toLowerCase();
+  // Only match if it's clearly an action command, not a question
+  if (lowerMessage.includes('what') || lowerMessage.includes('show') || lowerMessage.includes('tell') || lowerMessage.includes('how')) {
+    return false; // Questions are always read operations
+  }
+  
   return writeKeywords.some(keyword => lowerMessage.includes(keyword));
 }
 
@@ -259,7 +264,7 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     console.log('🤖 Calling Anthropic API...');
     
     const queryResponse = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-latest',
+      model: 'claude-3-5-sonnet-20241022',
       max_tokens: 1024,
       system: `You are a Shopify GraphQL expert. Convert natural language questions into valid Shopify GraphQL queries.
 
@@ -338,7 +343,7 @@ Only return the GraphQL query string, nothing else.`,
     }
     
     const formatResponse = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-latest',
+      model: 'claude-3-5-sonnet-20241022',
       max_tokens: 2048,
       system: `You are a helpful assistant formatting Shopify data for Slack.
 
