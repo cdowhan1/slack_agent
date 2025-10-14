@@ -2,6 +2,19 @@ const { App } = require('@slack/bolt');
 const Anthropic = require('@anthropic-ai/sdk');
 const fetch = require('node-fetch');
 
+// Validate environment variables
+console.log('🔍 Checking environment variables...');
+console.log('SLACK_BOT_TOKEN:', process.env.SLACK_BOT_TOKEN ? '✅ Set' : '❌ Missing');
+console.log('SLACK_APP_TOKEN:', process.env.SLACK_APP_TOKEN ? '✅ Set' : '❌ Missing');
+console.log('ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? '✅ Set' : '❌ Missing');
+console.log('SHOPIFY_STORE_URL:', process.env.SHOPIFY_STORE_URL ? '✅ Set' : '❌ Missing');
+console.log('SHOPIFY_ACCESS_TOKEN:', process.env.SHOPIFY_ACCESS_TOKEN ? '✅ Set' : '❌ Missing');
+
+if (!process.env.ANTHROPIC_API_KEY) {
+  console.error('❌ FATAL: ANTHROPIC_API_KEY environment variable is not set!');
+  process.exit(1);
+}
+
 // Initialize Slack app
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
@@ -9,10 +22,21 @@ const app = new App({
   appToken: process.env.SLACK_APP_TOKEN,
 });
 
-// Initialize Claude
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Initialize Claude with error handling
+let anthropic;
+try {
+  console.log('🤖 Initializing Anthropic SDK...');
+  console.log('API Key prefix:', process.env.ANTHROPIC_API_KEY.substring(0, 15));
+  
+  anthropic = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
+  
+  console.log('✅ Anthropic SDK initialized');
+} catch (error) {
+  console.error('❌ Failed to initialize Anthropic SDK:', error.message);
+  process.exit(1);
+}
 
 // ========================================
 // GUARDRAILS CONFIGURATION
@@ -153,32 +177,40 @@ async function queryShopify(graphqlQuery) {
 // ========================================
 
 // Handle app mentions and DMs
-app.event('app_mention', async ({ event, say }) => {
-  await handleMessage(event.text, event.user, say);
+app.event('app_mention', async ({ event, say, client }) => {
+  await handleMessage(event.text, event.user, say, client, event.channel);
 });
 
-app.message(async ({ message, say }) => {
+app.message(async ({ message, say, client }) => {
   // Only respond to DMs (not channel messages without @mention)
   if (message.channel_type === 'im') {
-    await handleMessage(message.text, message.user, say);
+    await handleMessage(message.text, message.user, say, client, message.channel);
   }
 });
 
 async function handleMessage(userMessage, userId, say, client, channelId) {
+  let statusMessage = null;
+  
   try {
     // Remove bot mention from message
     const cleanMessage = userMessage.replace(/<@[A-Z0-9]+>/g, '').trim();
     
-    // Show typing indicator
-    if (client && channelId) {
-      await client.conversations.typing({ channel: channelId });
-    }
+    // Send initial status message
+    statusMessage = await say('🔍 Analyzing your request...');
     
     // ========================================
     // GUARDRAIL 1: Check if user is allowed
     // ========================================
     if (!isUserAllowed(userId)) {
-      await say('❌ Sorry, you are not authorized to use this bot. Please contact an administrator.');
+      if (statusMessage && client && channelId) {
+        await client.chat.update({
+          channel: channelId,
+          ts: statusMessage.ts,
+          text: '❌ Sorry, you are not authorized to use this bot. Please contact an administrator.',
+        });
+      } else {
+        await say('❌ Sorry, you are not authorized to use this bot. Please contact an administrator.');
+      }
       return;
     }
     
@@ -186,7 +218,15 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     // GUARDRAIL 2: Rate limiting
     // ========================================
     if (!checkRateLimit(userId)) {
-      await say(`⏳ Rate limit exceeded. Please wait a minute before making more requests. (Limit: ${RATE_LIMIT.maxRequests} requests per minute)`);
+      if (statusMessage && client && channelId) {
+        await client.chat.update({
+          channel: channelId,
+          ts: statusMessage.ts,
+          text: `⏳ Rate limit exceeded. Please wait a minute before making more requests. (Limit: ${RATE_LIMIT.maxRequests} requests per minute)`,
+        });
+      } else {
+        await say(`⏳ Rate limit exceeded. Please wait a minute before making more requests. (Limit: ${RATE_LIMIT.maxRequests} requests per minute)`);
+      }
       return;
     }
     
@@ -195,12 +235,28 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     // ========================================
     if (isWriteOperation(cleanMessage)) {
       if (!ALLOWED_OPERATIONS.update && !isUserAdmin(userId)) {
-        await say('❌ Write operations are disabled. You can only perform read-only queries.');
+        if (statusMessage && client && channelId) {
+          await client.chat.update({
+            channel: channelId,
+            ts: statusMessage.ts,
+            text: '❌ Write operations are disabled. You can only perform read-only queries.',
+          });
+        } else {
+          await say('❌ Write operations are disabled. You can only perform read-only queries.');
+        }
         return;
       }
       
       if (!isUserAdmin(userId)) {
-        await say('❌ Only administrators can perform update operations.');
+        if (statusMessage && client && channelId) {
+          await client.chat.update({
+            channel: channelId,
+            ts: statusMessage.ts,
+            text: '❌ Only administrators can perform update operations.',
+          });
+        } else {
+          await say('❌ Only administrators can perform update operations.');
+        }
         return;
       }
     }
@@ -214,7 +270,21 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
       // For now, we'll just warn and continue
     }
     
+    // Update status: Generating query
+    if (statusMessage && client && channelId) {
+      await client.chat.update({
+        channel: channelId,
+        ts: statusMessage.ts,
+        text: '🤖 Generating Shopify query...',
+      });
+    }
+    
     // Step 1: Ask Claude to generate GraphQL query
+    // Show typing again since this takes time
+    if (client && channelId) {
+      await client.conversations.typing({ channel: channelId });
+    }
+    
     const queryResponse = await anthropic.messages.create({
       model: 'claude-3-5-sonnet-20241022',
       max_tokens: 1024,
@@ -242,12 +312,34 @@ Only return the GraphQL query string, nothing else. No markdown, no explanations
 
     const graphqlQuery = queryResponse.content[0].text.trim();
     
+    // Update status: Querying Shopify
+    if (statusMessage && client && channelId) {
+      await client.chat.update({
+        channel: channelId,
+        ts: statusMessage.ts,
+        text: '📦 Fetching data from Shopify...',
+      });
+    }
+    
+    // Show typing while executing Shopify query
+    if (client && channelId) {
+      await client.conversations.typing({ channel: channelId });
+    }
+    
     // ========================================
     // GUARDRAIL 5: Block mutation queries
     // ========================================
     if (isMutationQuery(graphqlQuery)) {
       if (!ALLOWED_OPERATIONS.update || !isUserAdmin(userId)) {
-        await say('❌ This query would modify data. Mutations are not allowed. Please use read-only queries.');
+        if (statusMessage && client && channelId) {
+          await client.chat.update({
+            channel: channelId,
+            ts: statusMessage.ts,
+            text: '❌ This query would modify data. Mutations are not allowed. Please use read-only queries.',
+          });
+        } else {
+          await say('❌ This query would modify data. Mutations are not allowed. Please use read-only queries.');
+        }
         return;
       }
     }
@@ -258,9 +350,31 @@ Only return the GraphQL query string, nothing else. No markdown, no explanations
     // Step 2: Execute query on Shopify
     const shopifyData = await queryShopify(graphqlQuery);
     
+    // Update status: Formatting response
+    if (statusMessage && client && channelId) {
+      await client.chat.update({
+        channel: channelId,
+        ts: statusMessage.ts,
+        text: '✨ Formatting your results...',
+      });
+    }
+    
+    // Show typing while formatting response
+    if (client && channelId) {
+      await client.conversations.typing({ channel: channelId });
+    }
+    
     // Check for errors
     if (shopifyData.errors) {
-      await say(`❌ Shopify API error: ${JSON.stringify(shopifyData.errors)}`);
+      if (statusMessage && client && channelId) {
+        await client.chat.update({
+          channel: channelId,
+          ts: statusMessage.ts,
+          text: `❌ Shopify API error: ${JSON.stringify(shopifyData.errors)}`,
+        });
+      } else {
+        await say(`❌ Shopify API error: ${JSON.stringify(shopifyData.errors)}`);
+      }
       return;
     }
     
@@ -287,12 +401,30 @@ Make the response:
 
     const formattedResponse = formatResponse.content[0].text;
     
+    // Delete the status message (or update to "Done!")
+    if (statusMessage && client && channelId) {
+      await client.chat.delete({
+        channel: channelId,
+        ts: statusMessage.ts,
+      });
+    }
+    
     // Step 4: Send response back to Slack
     await say(formattedResponse);
     
   } catch (error) {
     console.error('Error:', error);
-    await say(`❌ Sorry, I encountered an error: ${error.message}`);
+    
+    // Update status message with error
+    if (statusMessage && client && channelId) {
+      await client.chat.update({
+        channel: channelId,
+        ts: statusMessage.ts,
+        text: `❌ Sorry, I encountered an error: ${error.message}`,
+      });
+    } else {
+      await say(`❌ Sorry, I encountered an error: ${error.message}`);
+    }
   }
 }
 
