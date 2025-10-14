@@ -281,7 +281,7 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
     // STEP 1: Generate GraphQL Query with Claude
     // ========================================
     const queryResponse = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-latest',
+      model: 'claude-3-5-haiku-latest',
       max_tokens: 1500,
       system: `You are a Shopify GraphQL expert for a trading card and collectibles store. Convert natural language questions into efficient GraphQL queries.
 
@@ -438,7 +438,7 @@ RESPONSE FORMAT: Return ONLY the GraphQL query string. No explanations, no markd
     // STEP 3: Format response with Claude
     // ========================================
     const formatResponse = await anthropic.messages.create({
-      model: 'claude-3-5-sonnet-latest',
+      model: 'claude-3-5-haiku-latest',
       max_tokens: 2048,
       system: `You are a helpful assistant formatting Shopify product data for a trading card store.
 
