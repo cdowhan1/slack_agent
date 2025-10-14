@@ -1,0 +1,14 @@
+{
+  "name": "shopify-claude-bot",
+  "version": "1.0.0",
+  "description": "Claude-powered Shopify assistant for Slack",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@slack/bolt": "^3.15.0",
+    "@anthropic-ai/sdk": "^0.9.1",
+    "node-fetch": "^2.7.0"
+  }
+}
