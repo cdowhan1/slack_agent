@@ -183,7 +183,7 @@ app.event('app_mention', async ({ event, say, client }) => {
 
 app.message(async ({ message, say, client }) => {
   // Only respond to DMs (not channel messages without @mention)
-  if (message.channel_type === 'im') {
+  if (message.channel_type === 'im' && message.text) {
     await handleMessage(message.text, message.user, say, client, message.channel);
   }
 });
@@ -192,10 +192,16 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
   let statusMessage = null;
   
   try {
+    // Validate inputs
+    if (!userMessage || typeof userMessage !== 'string') {
+      console.error('Invalid message received:', userMessage);
+      return;
+    }
+    
     // Remove bot mention from message
     const cleanMessage = userMessage.replace(/<@[A-Z0-9]+>/g, '').trim();
     
-    // Send initial status message
+    // Send initial status message (without using client.chat.update yet)
     statusMessage = await say('🔍 Analyzing your request...');
     
     // ========================================
@@ -313,17 +319,16 @@ Only return the GraphQL query string, nothing else. No markdown, no explanations
     const graphqlQuery = queryResponse.content[0].text.trim();
     
     // Update status: Querying Shopify
-    if (statusMessage && client && channelId) {
-      await client.chat.update({
-        channel: channelId,
-        ts: statusMessage.ts,
-        text: '📦 Fetching data from Shopify...',
-      });
-    }
-    
-    // Show typing while executing Shopify query
-    if (client && channelId) {
-      await client.conversations.typing({ channel: channelId });
+    if (statusMessage && client && channelId && statusMessage.ts) {
+      try {
+        await client.chat.update({
+          channel: channelId,
+          ts: statusMessage.ts,
+          text: '📦 Fetching data from Shopify...',
+        });
+      } catch (updateError) {
+        console.error('Failed to update status message:', updateError.message);
+      }
     }
     
     // ========================================
@@ -351,17 +356,16 @@ Only return the GraphQL query string, nothing else. No markdown, no explanations
     const shopifyData = await queryShopify(graphqlQuery);
     
     // Update status: Formatting response
-    if (statusMessage && client && channelId) {
-      await client.chat.update({
-        channel: channelId,
-        ts: statusMessage.ts,
-        text: '✨ Formatting your results...',
-      });
-    }
-    
-    // Show typing while formatting response
-    if (client && channelId) {
-      await client.conversations.typing({ channel: channelId });
+    if (statusMessage && client && channelId && statusMessage.ts) {
+      try {
+        await client.chat.update({
+          channel: channelId,
+          ts: statusMessage.ts,
+          text: '✨ Formatting your results...',
+        });
+      } catch (updateError) {
+        console.error('Failed to update status message:', updateError.message);
+      }
     }
     
     // Check for errors
@@ -402,11 +406,16 @@ Make the response:
     const formattedResponse = formatResponse.content[0].text;
     
     // Delete the status message (or update to "Done!")
-    if (statusMessage && client && channelId) {
-      await client.chat.delete({
-        channel: channelId,
-        ts: statusMessage.ts,
-      });
+    if (statusMessage && client && channelId && statusMessage.ts) {
+      try {
+        await client.chat.delete({
+          channel: channelId,
+          ts: statusMessage.ts,
+        });
+      } catch (deleteError) {
+        console.error('Failed to delete status message:', deleteError.message);
+        // Not critical, continue
+      }
     }
     
     // Step 4: Send response back to Slack
