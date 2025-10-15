@@ -505,10 +505,9 @@ CORRECT FORMAT:
 query { products(first: 250, query: "title:*pikachu* AND product_type:Graded") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity sku } } } grading: metafield(namespace: "global", key: "Grading") { value } grade: metafield(namespace: "global", key: "Grade") { value } } } pageInfo { hasNextPage } } }
 
 INCORRECT FORMATS (NEVER DO THIS):
-- I'll query for... query { ... }
-- ```graphql query { ... } ```
-- Here's the query: query { ... }
-- query { ... } // this will get the products`,
+- Adding text before the query
+- Wrapping in code blocks or markdown
+- Adding comments or explanations after the query`,
       messages: [{
         role: 'user',
         content: cleanMessage,
