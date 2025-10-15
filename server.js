@@ -311,24 +311,29 @@ AVAILABLE METAFIELDS: (If you cannot find a specific metafield, try messing with
 - global.singlesent: entertainment for Singles
 - global.sport: sport name (e.g., "Baseball", "Basketball")
 - global.Modern: "Modern" or "Vintage"
-- global.Grading: grading company (e.g., "PSA", "BGS", "CGC")
-- global.Grade: grade number (e.g., "10", "9.5", "9")
+- global.Grading: grading company (e.g., "PSA", "BGS", "CGC") - IMPORTANT: namespace is "global" not "custom"
+- global.Grade: grade number (e.g., "10", "9.5", "9") - IMPORTANT: namespace is "global" not "custom"
 - custom.player_name: player name ("Shohei Ohtani")
 - custom.team: team name
 
-QUERY STRATEGY FOR LARGE CATALOGS:
-1. ALWAYS filter by product_type FIRST when relevant:
-   - User mentions "sealed", "boxes", "packs" → query: "product_type:Sealed"
-   - User mentions "cards", "singles", "graded", "raw" → query: "product_type:Singles"
+QUERY STRATEGY FOR LARGE CATALOGS - FOLLOW THIS ORDER:
+1. ALWAYS filter by title FIRST if user mentions specific names:
+   - User mentions "Pikachu" → query: "title:*pikachu*"
+   - User mentions "Charizard" → query: "title:*charizard*"
+   - User mentions specific player like "Ohtani" → query: "title:*ohtani*"
+   - ALWAYS use wildcards: title:*keyword*
+   - Title search is case-insensitive
 
-2. Combine filters in query string for server-side filtering:
-   query: "product_type:Singles AND title:*pikachu*"
-   query: "product_type:Sealed AND title:*baseball*"
+2. THEN add product_type filter:
+   - User mentions "cards", "singles", "graded", "raw", or specific card names → add "AND product_type:Singles"
+   - User mentions "sealed", "boxes", "packs" → add "AND product_type:Sealed"
 
-3. Fetch ONLY needed metafields using specific syntax:
-   metafield(namespace: "global", key: "Grade") { value } 
-   Use aliases for readability: grade: metafield(namespace: "global", key: "Grade") { value }
-
+3. Fetch relevant metafields for filtering in response:
+   - For graded cards: ALWAYS fetch both Grading and Grade metafields from "global" namespace
+   - metafield(namespace: "global", key: "Grade") { value } 
+   - metafield(namespace: "global", key: "Grading") { value }
+   - Use aliases: grade: metafield(namespace: "global", key: "Grade") { value }
+   
 4. Pagination and Counting:
    - For "how many" questions: first: 250 (max per query)
    - ALWAYS include pageInfo { hasNextPage } for count queries
@@ -336,11 +341,17 @@ QUERY STRATEGY FOR LARGE CATALOGS:
    - Never fetch all metafields - only what's needed
    - CRITICAL: ProductConnection has NO totalCount field - the count will be done client-side from edges array
 
+FILTERING HIERARCHY (CRITICAL):
+- Step 1: Filter by title in GraphQL query (server-side) - MOST SPECIFIC
+- Step 2: Filter by product_type in GraphQL query (server-side)
+- Step 3: Filter by metafields in response formatting (client-side)
+- You CANNOT filter by metafield values in the GraphQL query - metafields must be filtered after receiving results
+
 QUERY EXAMPLES:
 
 PSA 10 Pikachu cards (count):
 query { 
-  products(first: 250, query: "product_type:Singles AND title:*pikachu*") { 
+  products(first: 250, query: "title:*pikachu* AND product_type:Singles") { 
     edges { 
       node { 
         id 
@@ -365,7 +376,7 @@ query {
 
 Sealed hobby boxes from 2022 Baseball:
 query { 
-  products(first: 250, query: "product_type:Sealed AND title:*baseball*") { 
+  products(first: 250, query: "title:*baseball* AND product_type:Sealed") { 
     edges { 
       node { 
         id 
@@ -391,7 +402,7 @@ query {
 
 Baseball cards by specific player:
 query { 
-  products(first: 250, query: "product_type:Singles AND title:*trout*") { 
+  products(first: 250, query: "title:*trout* AND product_type:Singles") { 
     edges { 
       node { 
         id 
@@ -416,7 +427,7 @@ query {
 
 Modern vs Vintage Pokemon singles:
 query { 
-  products(first: 250, query: "product_type:Singles AND title:*pokemon*") { 
+  products(first: 250, query: "title:*pokemon* AND product_type:Singles") { 
     edges { 
       node { 
         id 
@@ -462,15 +473,24 @@ query {
   } 
 }
 
-CRITICAL RULES:
-- Always use product_type filter first
-- Fetch specific and relevant metafields based on user request, not all metafields
-- Use aliases for metafields (grade:, player:, sport:)
+CRITICAL RULES - QUERY CONSTRUCTION:
+- STEP 1: Always start with title filter if user mentions specific names (MOST SPECIFIC FIRST)
+- STEP 2: Add product_type filter
+- STEP 3: Fetch specific metafields needed for filtering
+- Query format: "title:*keyword* AND product_type:Singles"
+- You CANNOT filter by metafield values in the query string - they are filtered client-side
 - NEVER use totalCount - it doesn't exist on ProductConnection
 - ALWAYS include pageInfo { hasNextPage } for counting queries
-- For grade questions, ALWAYS fetch BOTH "Grading" and "Grade" metafields
-- Title searches use wildcards: title:*keyword*
-- Check metafield namespace carefully: "custom" vs "global"
+- For grade questions, ALWAYS fetch BOTH "Grading" and "Grade" metafields from "global" namespace
+- Title searches use wildcards and are case-insensitive: title:*keyword*
+- Check metafield namespace carefully: Grading/Grade are in "global", player_name/team are in "custom"
+
+EXAMPLE QUERY CONSTRUCTION:
+User asks: "how many PSA 10 Pikachu cards"
+Query structure:
+1. title:*pikachu* (most specific - filter by character name first)
+2. AND product_type:Singles (it's a card)
+3. Fetch grading: metafield(namespace: "global", key: "Grading") and grade: metafield(namespace: "global", key: "Grade") to filter PSA 10 client-side
 
 RESPONSE FORMAT: Return ONLY the GraphQL query string. No explanations, no markdown, no code blocks.`,
       messages: [{
@@ -567,20 +587,34 @@ FORMAT GUIDELINES:
   * Lead with the TOTAL COUNT in bold
   * If pageInfo.hasNextPage is true, mention "250+ items (showing first 250)"
 - For graded cards: Always show grading company AND grade together
-- If a user is asking for <10 products, make sure you embed the product LINK from the shopify admin page onto the product title so the user can quickly go in and check it.
 
-COUNTING LOGIC (IMPORTANT):
-When user asks "how many PSA 10 pikachu cards":
-1. Loop through edges array
-2. Filter products where grading metafield value === "PSA" AND grade metafield value === "10"
-3. Count the filtered results
-4. Sum up inventoryQuantity for total units in stock across all filtered products
-5. Return the count prominently
+COUNTING LOGIC (CRITICAL - FOLLOW EXACTLY):
 
-When user asks "how many sealed baseball boxes":
-1. Count all edges in the array
-2. If pageInfo.hasNextPage is true, indicate there are more than 250
+Step 1: Check if edges array exists and has items
+- If edges array is empty or has 0 items, the title filter didn't match anything
+- This means the GraphQL query didn't find products with that name
+
+Step 2: For "how many [GRADE] [CHARACTER] cards" questions:
+Example: "how many PSA 10 pikachu cards"
+1. The query ALREADY filtered by title (title:*pikachu*), so all edges contain Pikachu
+2. Loop through each edge in the edges array
+3. Check if node.grading.value exists and equals "PSA" (case-sensitive)
+4. Check if node.grade.value exists and equals "10" (might be string or number)
+5. Count only edges where BOTH conditions are true
+6. Sum inventoryQuantity from filtered products
+
+Step 3: For general counting without grade filter:
+Example: "how many pikachu cards"
+1. Simply count the length of edges array
+2. All items already match the title filter from the query
 3. Sum up inventoryQuantity for total units
+
+IMPORTANT FILTERING NOTES:
+- The title search happens in the GraphQL query (server-side)
+- The grade/grading filtering happens here (client-side) 
+- If edges is empty, it means no products match the title search
+- Metafield values might be null - check existence before comparing
+- Grade might be stored as "10" (string) or 10 (number) - handle both
 
 RESPONSE PATTERNS:
 
