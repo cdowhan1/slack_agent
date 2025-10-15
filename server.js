@@ -288,18 +288,17 @@ async function handleMessage(userMessage, userId, say, client, channelId) {
 STORE STRUCTURE:
 - product_type values: 
 - "Sealed" (boxes/packs), 
-- "Graded" or "Raw" (individual cards,Graded cards utilize the Grading and Grade metafields, since they've been graded and authenticated by a professional grader)
+- "Graded" or "Raw" (individual cards, Graded cards utilize the Grading and Grade metafields, since they've been graded and authenticated by a professional grader)
 - "Jerseys" (for apparel), 
-- "Sealed Case" (Cases, separate from "Sealed" due to higher pricep point and target consumer
+- "Sealed Case" (Cases, separate from "Sealed" due to higher price point and target consumer)
 
-
-AVAILABLE METAFIELDS: (If you cannot find a specific metafield, try messing with the cases and capitalizations (e.g Singlesent vs. singlesent)
+AVAILABLE METAFIELDS: (If you cannot find a specific metafield, try messing with the cases and capitalizations (e.g Singlesent vs. singlesent))
 - global.created_at: when product was created
 - global.updated_at: when manually updated
 - global.updated_price_count: count of manual discounts
 - global.releasedate: release date
 - global.serial: serial number
-- global.supbrand,supplier brand 
+- global.supbrand: supplier brand 
 - global.suptype: supplier type (not typically used)
 - global.waxtype: variant for Sealed (e.g., "hobby box", "blaster box")
 - global.waxman: manufacturer for Sealed products
@@ -314,51 +313,164 @@ AVAILABLE METAFIELDS: (If you cannot find a specific metafield, try messing with
 - global.Modern: "Modern" or "Vintage"
 - global.Grading: grading company (e.g., "PSA", "BGS", "CGC")
 - global.Grade: grade number (e.g., "10", "9.5", "9")
-- custom.player_name: player name ("Shohei Ohtani)
+- custom.player_name: player name ("Shohei Ohtani")
 - custom.team: team name
 
 QUERY STRATEGY FOR LARGE CATALOGS:
 1. ALWAYS filter by product_type FIRST when relevant:
-   - User mentions "sealed", "graded" or "raw" → query: "product_type:Sealed"
-   - User mentions "cards", "singles", "graded" → query: "product_type:Singles"
+   - User mentions "sealed", "boxes", "packs" → query: "product_type:Sealed"
+   - User mentions "cards", "singles", "graded", "raw" → query: "product_type:Singles"
 
 2. Combine filters in query string for server-side filtering:
    query: "product_type:Singles AND title:*pikachu*"
    query: "product_type:Sealed AND title:*baseball*"
 
 3. Fetch ONLY needed metafields using specific syntax:
-   metafield(namespace: "custom", key: "Grade") { value } 
-   Use aliases for readability: grade: metafield(namespace: "custom", key: "Grade") { value }
+   metafield(namespace: "global", key: "Grade") { value } 
+   Use aliases for readability: grade: metafield(namespace: "global", key: "Grade") { value }
 
-4. Pagination:
+4. Pagination and Counting:
    - For "how many" questions: first: 250 (max per query)
+   - ALWAYS include pageInfo { hasNextPage } for count queries
    - For "show me" questions: first: 10-20
    - Never fetch all metafields - only what's needed
+   - CRITICAL: ProductConnection has NO totalCount field - the count will be done client-side from edges array
 
 QUERY EXAMPLES:
 
 PSA 10 Pikachu cards (count):
-query { products(first: 250, query: "product_type:Singles AND title:*pikachu*") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity sku } } } grading: metafield(namespace: "custom", key: "Grading") { value } grade: metafield(namespace: "custom", key: "Grade") { value } } } } }
+query { 
+  products(first: 250, query: "product_type:Singles AND title:*pikachu*") { 
+    edges { 
+      node { 
+        id 
+        title 
+        variants(first: 1) { 
+          edges { 
+            node { 
+              inventoryQuantity 
+              sku 
+            } 
+          } 
+        } 
+        grading: metafield(namespace: "global", key: "Grading") { value } 
+        grade: metafield(namespace: "global", key: "Grade") { value } 
+      } 
+    }
+    pageInfo {
+      hasNextPage
+    }
+  } 
+}
 
 Sealed hobby boxes from 2022 Baseball:
-query { products(first: 250, query: "product_type:Sealed AND title:*baseball*") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity price } } } waxtype: metafield(namespace: "custom", key: "waxtype") { value } waxyear: metafield(namespace: "custom", key: "waxyear") { value } waxsport: metafield(namespace: "custom", key: "waxsport") { value } } } } }
+query { 
+  products(first: 250, query: "product_type:Sealed AND title:*baseball*") { 
+    edges { 
+      node { 
+        id 
+        title 
+        variants(first: 1) { 
+          edges { 
+            node { 
+              inventoryQuantity 
+              price 
+            } 
+          } 
+        } 
+        waxtype: metafield(namespace: "global", key: "waxtype") { value } 
+        waxyear: metafield(namespace: "global", key: "waxyear") { value } 
+        waxsport: metafield(namespace: "global", key: "waxsport") { value } 
+      } 
+    }
+    pageInfo {
+      hasNextPage
+    }
+  } 
+}
 
 Baseball cards by specific player:
-query { products(first: 250, query: "product_type:Singles AND title:*trout*") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity } } } sport: metafield(namespace: "custom", key: "Sport") { value } player: metafield(namespace: "custom", key: "player_name") { value } team: metafield(namespace: "custom", key: "Team") { value } } } } }
+query { 
+  products(first: 250, query: "product_type:Singles AND title:*trout*") { 
+    edges { 
+      node { 
+        id 
+        title 
+        variants(first: 1) { 
+          edges { 
+            node { 
+              inventoryQuantity 
+            } 
+          } 
+        } 
+        sport: metafield(namespace: "global", key: "sport") { value } 
+        player: metafield(namespace: "custom", key: "player_name") { value } 
+        team: metafield(namespace: "custom", key: "team") { value } 
+      } 
+    }
+    pageInfo {
+      hasNextPage
+    }
+  } 
+}
 
 Modern vs Vintage Pokemon singles:
-query { products(first: 250, query: "product_type:Singles AND title:*pokemon*") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity } } } modern: metafield(namespace: "custom", key: "Modern") { value } game: metafield(namespace: "custom", key: "singlesgame") { value } } } } }
+query { 
+  products(first: 250, query: "product_type:Singles AND title:*pokemon*") { 
+    edges { 
+      node { 
+        id 
+        title 
+        variants(first: 1) { 
+          edges { 
+            node { 
+              inventoryQuantity 
+            } 
+          } 
+        } 
+        modern: metafield(namespace: "global", key: "Modern") { value } 
+        game: metafield(namespace: "global", key: "singlesgame") { value } 
+      } 
+    }
+    pageInfo {
+      hasNextPage
+    }
+  } 
+}
 
 BGS graded cards:
-query { products(first: 250, query: "product_type:Singles") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity } } } grading: metafield(namespace: "custom", key: "Grading") { value } grade: metafield(namespace: "custom", key: "Grade") { value } } } } }
+query { 
+  products(first: 250, query: "product_type:Singles") { 
+    edges { 
+      node { 
+        id 
+        title 
+        variants(first: 1) { 
+          edges { 
+            node { 
+              inventoryQuantity 
+            } 
+          } 
+        } 
+        grading: metafield(namespace: "global", key: "Grading") { value } 
+        grade: metafield(namespace: "global", key: "Grade") { value } 
+      } 
+    }
+    pageInfo {
+      hasNextPage
+    }
+  } 
+}
 
 CRITICAL RULES:
 - Always use product_type filter first
 - Fetch specific and relevant metafields based on user request, not all metafields
 - Use aliases for metafields (grade:, player:, sport:)
-- ProductConnection has NO totalCount field - count results in edges array
+- NEVER use totalCount - it doesn't exist on ProductConnection
+- ALWAYS include pageInfo { hasNextPage } for counting queries
 - For grade questions, ALWAYS fetch BOTH "Grading" and "Grade" metafields
 - Title searches use wildcards: title:*keyword*
+- Check metafield namespace carefully: "custom" vs "global"
 
 RESPONSE FORMAT: Return ONLY the GraphQL query string. No explanations, no markdown, no code blocks.`,
       messages: [{
@@ -448,15 +560,35 @@ FORMAT GUIDELINES:
 - Use *bold* for important info (prices, grades, inventory counts)
 - Keep it concise and scannable
 - Maximum 10 items per response (mention if there are more)
-- For "how many" questions: Lead with the TOTAL COUNT in bold
+- For "how many" questions: 
+  * You MUST count the edges array yourself and filter by the criteria
+  * For PSA 10 cards: count only products where grade.value = "10" AND grading.value = "PSA"
+  * For BGS 9.5 cards: count only where grade.value = "9.5" AND grading.value = "BGS"
+  * Lead with the TOTAL COUNT in bold
+  * If pageInfo.hasNextPage is true, mention "250+ items (showing first 250)"
 - For graded cards: Always show grading company AND grade together
+- If a user is asking for <10 products, make sure you embed the product LINK from the shopify admin page onto the product title so the user can quickly go in and check it.
+
+COUNTING LOGIC (IMPORTANT):
+When user asks "how many PSA 10 pikachu cards":
+1. Loop through edges array
+2. Filter products where grading metafield value === "PSA" AND grade metafield value === "10"
+3. Count the filtered results
+4. Sum up inventoryQuantity for total units in stock across all filtered products
+5. Return the count prominently
+
+When user asks "how many sealed baseball boxes":
+1. Count all edges in the array
+2. If pageInfo.hasNextPage is true, indicate there are more than 250
+3. Sum up inventoryQuantity for total units
 
 RESPONSE PATTERNS:
 
-For counting queries:
-Found *12 products* matching your search:
+For counting queries with grade filters:
+Found *12 PSA 10 Pikachu cards* (27 total units in stock):
 • Product Name - SKU: ABC123 - Stock: 5 units - PSA 10 - $299.99
-• Product Name 2 - SKU: DEF456 - Stock: 0 units - BGS 9.5 - $149.99
+• Product Name 2 - SKU: DEF456 - Stock: 2 units - PSA 10 - $149.99
+(showing first 10 of 12)
 
 For inventory queries:
 📊 *Inventory Status*
@@ -464,12 +596,14 @@ For inventory queries:
 • Product Name 2 - *Out of stock* - $29.99
 
 For sealed products:
-📦 *Sealed Products*
+📦 *Sealed Products* - Found *8 boxes*
 • 2022 Baseball Hobby Box - Manufacturer: Topps - Stock: 8 boxes - $89.99
-• 2023 Basketball Blaster - Manufacturer: Panini - Stock: 3 boxes - $39.99`,
+• 2023 Basketball Blaster - Manufacturer: Panini - Stock: 3 boxes - $39.99
+
+CRITICAL: You must actually count and filter the data yourself. Don't just say "the data shows" - count the edges array and apply the filters based on metafield values.`,
       messages: [{
         role: 'user',
-        content: `User asked: "${cleanMessage}"\n\nShopify data:\n${JSON.stringify(shopifyData.data, null, 2)}\n\nFormat this for Slack.`,
+        content: `User asked: "${cleanMessage}"\n\nShopify data:\n${JSON.stringify(shopifyData.data, null, 2)}\n\nFormat this for Slack. Remember to COUNT and FILTER the edges array yourself based on metafield values.`,
       }],
     });
 
