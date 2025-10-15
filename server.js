@@ -499,7 +499,16 @@ Query structure:
 2. AND product_type:Graded (PSA 10 means it's graded, not raw)
 3. Fetch grading: metafield(namespace: "global", key: "Grading") and grade: metafield(namespace: "global", key: "Grade") to filter PSA 10 client-side
 
-RESPONSE FORMAT: Return ONLY the GraphQL query string. No explanations, no markdown, no code blocks.`,
+RESPONSE FORMAT: Return ONLY the raw GraphQL query string. No explanations, no markdown, no code blocks, no comments, no extra text before or after. Just the query itself starting with "query" and ending with the final closing brace.
+
+CORRECT FORMAT:
+query { products(first: 250, query: "title:*pikachu* AND product_type:Graded") { edges { node { id title variants(first: 1) { edges { node { inventoryQuantity sku } } } grading: metafield(namespace: "global", key: "Grading") { value } grade: metafield(namespace: "global", key: "Grade") { value } } } pageInfo { hasNextPage } } }
+
+INCORRECT FORMATS (NEVER DO THIS):
+- I'll query for... query { ... }
+- ```graphql query { ... } ```
+- Here's the query: query { ... }
+- query { ... } // this will get the products`,
       messages: [{
         role: 'user',
         content: cleanMessage,
@@ -602,13 +611,14 @@ Step 1: Check if edges array exists and has items
 - This means the GraphQL query didn't find products with that name
 
 Step 2: For "how many [GRADE] [CHARACTER] cards" questions:
-Example: "how many PSA 10 pikachu cards"
+Example: "how many PSA 10 pikachu cards do we have"
 1. The query ALREADY filtered by title (title:*pikachu*), so all edges contain Pikachu
 2. Loop through each edge in the edges array
 3. Check if node.grading.value exists and equals "PSA" (case-sensitive)
 4. Check if node.grade.value exists and equals "10" (might be string or number)
-5. Count only edges where BOTH conditions are true
-6. Sum inventoryQuantity from filtered products
+5. Check if inventoryQuantity > 0 (ONLY count items in stock)
+6. Count only edges where ALL THREE conditions are true
+7. Sum inventoryQuantity from filtered products for total units
 
 Step 3: For general counting without grade filter:
 Example: "how many pikachu cards"
@@ -616,20 +626,29 @@ Example: "how many pikachu cards"
 2. All items already match the title filter from the query
 3. Sum up inventoryQuantity for total units
 
+Step 4: IMPORTANT - When user asks "how many...do we have" or "in stock":
+- ONLY count products where inventoryQuantity > 0
+- Exclude out of stock items (inventoryQuantity = 0)
+- Be clear about in-stock vs total counts
+
 IMPORTANT FILTERING NOTES:
 - The title search happens in the GraphQL query (server-side)
 - The grade/grading filtering happens here (client-side) 
+- The inventory filtering (in stock vs out of stock) happens here (client-side)
 - If edges is empty, it means no products match the title search
 - Metafield values might be null - check existence before comparing
 - Grade might be stored as "10" (string) or 10 (number) - handle both
+- When user asks about stock, ALWAYS filter by inventoryQuantity > 0
 
 RESPONSE PATTERNS:
 
 For counting queries with grade filters:
-Found *12 PSA 10 Pikachu cards* (27 total units in stock):
-• Product Name - SKU: ABC123 - Stock: 5 units - PSA 10 - $299.99
-• Product Name 2 - SKU: DEF456 - Stock: 2 units - PSA 10 - $149.99
-(showing first 10 of 12)
+Found *2 PSA 10 Pikachu cards in stock* (3 total units available):
+• Product Name - SKU: ABC123 - Stock: 2 units - PSA 10 - $299.99
+• Product Name 2 - SKU: DEF456 - Stock: 1 unit - PSA 10 - $149.99
+
+If there are out-of-stock items that match, mention separately:
+(Note: 13 additional PSA 10 Pikachu cards are currently out of stock)
 
 For inventory queries:
 📊 *Inventory Status*
