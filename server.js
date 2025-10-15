@@ -325,8 +325,11 @@ QUERY STRATEGY FOR LARGE CATALOGS - FOLLOW THIS ORDER:
    - Title search is case-insensitive
 
 2. THEN add product_type filter:
-   - User mentions "cards", "singles", "graded", "raw", or specific card names → add "AND product_type:Singles"
+   - User mentions "cards", "graded", or specific card names → add "AND (product_type:Graded OR product_type:Raw)"
    - User mentions "sealed", "boxes", "packs" → add "AND product_type:Sealed"
+   - User mentions "case" or "cases" → add "AND product_type:\"Sealed Case\""
+   - User mentions "jersey" or "apparel" → add "AND product_type:Jerseys"
+   - For graded cards specifically (PSA, BGS, CGC) → use "AND product_type:Graded"
 
 3. Fetch relevant metafields for filtering in response:
    - For graded cards: ALWAYS fetch both Grading and Grade metafields from "global" namespace
@@ -343,7 +346,7 @@ QUERY STRATEGY FOR LARGE CATALOGS - FOLLOW THIS ORDER:
 
 FILTERING HIERARCHY (CRITICAL):
 - Step 1: Filter by title in GraphQL query (server-side) - MOST SPECIFIC
-- Step 2: Filter by product_type in GraphQL query (server-side)
+- Step 2: Filter by product_type in GraphQL query (server-side) - Valid types: "Graded", "Raw", "Sealed", "Sealed Case", "Jerseys"
 - Step 3: Filter by metafields in response formatting (client-side)
 - You CANNOT filter by metafield values in the GraphQL query - metafields must be filtered after receiving results
 
@@ -351,7 +354,7 @@ QUERY EXAMPLES:
 
 PSA 10 Pikachu cards (count):
 query { 
-  products(first: 250, query: "title:*pikachu* AND product_type:Singles") { 
+  products(first: 250, query: "title:*pikachu* AND product_type:Graded") { 
     edges { 
       node { 
         id 
@@ -402,7 +405,7 @@ query {
 
 Baseball cards by specific player:
 query { 
-  products(first: 250, query: "title:*trout* AND product_type:Singles") { 
+  products(first: 250, query: "title:*trout* AND (product_type:Graded OR product_type:Raw)") { 
     edges { 
       node { 
         id 
@@ -425,9 +428,9 @@ query {
   } 
 }
 
-Modern vs Vintage Pokemon singles:
+Modern vs Vintage Pokemon cards:
 query { 
-  products(first: 250, query: "title:*pokemon* AND product_type:Singles") { 
+  products(first: 250, query: "title:*pokemon* AND (product_type:Graded OR product_type:Raw)") { 
     edges { 
       node { 
         id 
@@ -451,7 +454,7 @@ query {
 
 BGS graded cards:
 query { 
-  products(first: 250, query: "product_type:Singles") { 
+  products(first: 250, query: "product_type:Graded") { 
     edges { 
       node { 
         id 
@@ -475,9 +478,13 @@ query {
 
 CRITICAL RULES - QUERY CONSTRUCTION:
 - STEP 1: Always start with title filter if user mentions specific names (MOST SPECIFIC FIRST)
-- STEP 2: Add product_type filter
+- STEP 2: Add product_type filter using ONLY these values: "Graded", "Raw", "Sealed", "Sealed Case", "Jerseys"
 - STEP 3: Fetch specific metafields needed for filtering
-- Query format: "title:*keyword* AND product_type:Singles"
+- Query format examples:
+  * For graded cards: "title:*pikachu* AND product_type:Graded"
+  * For any cards (graded or raw): "title:*pikachu* AND (product_type:Graded OR product_type:Raw)"
+  * For sealed: "title:*baseball* AND product_type:Sealed"
+  * For sealed cases: "product_type:\"Sealed Case\""
 - You CANNOT filter by metafield values in the query string - they are filtered client-side
 - NEVER use totalCount - it doesn't exist on ProductConnection
 - ALWAYS include pageInfo { hasNextPage } for counting queries
@@ -489,7 +496,7 @@ EXAMPLE QUERY CONSTRUCTION:
 User asks: "how many PSA 10 Pikachu cards"
 Query structure:
 1. title:*pikachu* (most specific - filter by character name first)
-2. AND product_type:Singles (it's a card)
+2. AND product_type:Graded (PSA 10 means it's graded, not raw)
 3. Fetch grading: metafield(namespace: "global", key: "Grading") and grade: metafield(namespace: "global", key: "Grade") to filter PSA 10 client-side
 
 RESPONSE FORMAT: Return ONLY the GraphQL query string. No explanations, no markdown, no code blocks.`,
